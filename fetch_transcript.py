@@ -1,68 +1,59 @@
 import yt_dlp
 import os
 import sys
-import requests
 
 def run(video_url):
     cookie_file = 'cookies_temp.txt'
+    # 定义临时字幕文件名前缀
+    output_temp = 'temp_sub'
     
     ydl_opts = {
-        'skip_download': True,
-        'writesubtitles': True,         # 检查手动上传字幕
-        'writeautomaticsub': True,     # 强制检查自动生成字幕
-        'subtitleslangs': ['zh.*', 'en'], # 使用通配符抓取所有中文变体
+        'skip_download': True,        # 不下载视频
+        'writesubtitles': True,       # 下载手动字幕
+        'writeautomaticsub': True,    # 下载自动字幕
+        'subtitleslangs': ['zh.*', 'en'], # 匹配中文
         'cookiefile': cookie_file if os.path.exists(cookie_file) else None,
-        'quiet': True
+        'outtmpl': output_temp,       # 设定输出文件名
+        # 核心设置：强制将字幕转换成纯文本格式 (srt)
+        'postprocessors': [{
+            'key': 'FFmpegSubtitlesConvertor',
+            'format': 'srt',
+        }],
+        'quiet': False
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            print("正在深度扫描字幕...")
-            info = ydl.extract_info(video_url, download=False)
+            print("正在调用 yt-dlp 下载并转换字幕...")
+            ydl.download([video_url])
             
-            # 整合所有可能的字幕来源
-            all_subs = {**info.get('subtitles', {}), **info.get('automatic_captions', {})}
+            # yt-dlp 会生成类似 temp_sub.zh-Hant.srt 的文件
+            # 我们寻找生成的 srt 文件并合并到 result.txt
+            files = os.listdir('.')
+            srt_files = [f for f in files if f.endswith('.srt')]
             
-            # 筛选出所有中文相关的 Key (如 zh-Hans, zh-Hant, zh-TW, zh 等)
-            zh_keys = [k for k in all_subs.keys() if k.startswith('zh')]
-            
-            target_key = None
-            if zh_keys:
-                target_key = zh_keys[0] # 取找到的第一个中文版本
-                print(f"找到中文标签: {target_key}")
-            elif 'en' in all_subs:
-                target_key = 'en'
-                print("未找到中文，回退至英文。")
-
-            transcript_text = "未找到任何字幕轨道。请检查视频是否开启了 CC 字幕。"
-
-            if target_key:
-                sub_info = all_subs[target_key]
-                # 尝试多种格式：json3 > vtt > srt
-                json_url = next((s['url'] for s in sub_info if 'json3' in s.get('ext', '')), None)
+            if srt_files:
+                target_srt = srt_files[0]
+                print(f"解析到字幕文件: {target_srt}")
+                with open(target_srt, 'r', encoding='utf-8') as f_in:
+                    content = f_in.read()
                 
-                if json_url:
-                    resp = requests.get(json_url)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        lines = []
-                        for event in data.get('events', []):
-                            if 'segs' in event:
-                                text = "".join([s['utf8'] for s in event['segs'] if 'utf8' in s]).strip()
-                                if text: lines.append(text)
-                        transcript_text = "\n".join(lines)
-                else:
-                    transcript_text = f"找到字幕轨道但无法解析格式。下载链接: {sub_info[0]['url']}"
-            
-            with open('result.txt', 'w', encoding='utf-8') as f:
-                f.write(f"标题: {info.get('title')}\n")
-                f.write("-" * 30 + "\n")
-                f.write(transcript_text)
+                # 简单清理一下 SRT 的时间轴，只保留文字（可选）
+                import re
+                clean_text = re.sub(r'\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\n', '', content)
                 
-            print("处理完毕。")
-            
+                with open('result.txt', 'w', encoding='utf-8') as f_out:
+                    f_out.write(f"视频链接: {video_url}\n")
+                    f_out.write("-" * 30 + "\n")
+                    f_out.write(clean_text)
+                print("成功将字幕存入 result.txt")
+            else:
+                with open('result.txt', 'w', encoding='utf-8') as f_out:
+                    f_out.write("未能在输出中找到任何生成的字幕文件。")
+                print("未能生成字幕。")
+                
     except Exception as e:
-        print(f"错误细节: {e}")
+        print(f"运行出错: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
