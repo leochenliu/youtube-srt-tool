@@ -6,71 +6,64 @@ import requests
 def run(video_url):
     cookie_file = 'cookies_temp.txt'
     
-    # 配置 yt-dlp 寻找中文或英文字幕
     ydl_opts = {
         'skip_download': True,
-        'writesubtitles': True,
-        'writeautomaticsub': True,
-        'subtitleslangs': ['zh-Hans', 'zh-CN', 'en'],
+        'writesubtitles': True,         # 检查手动上传字幕
+        'writeautomaticsub': True,     # 强制检查自动生成字幕
+        'subtitleslangs': ['zh.*', 'en'], # 使用通配符抓取所有中文变体
         'cookiefile': cookie_file if os.path.exists(cookie_file) else None,
+        'quiet': True
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            print("正在获取视频元数据...")
+            print("正在深度扫描字幕...")
             info = ydl.extract_info(video_url, download=False)
-            title = info.get('title', 'transcript')
             
-            # 1. 尝试寻找手动上传的字幕或自动生成的字幕
-            subtitles = info.get('subtitles') or info.get('automatic_captions')
+            # 整合所有可能的字幕来源
+            all_subs = {**info.get('subtitles', {}), **info.get('automatic_captions', {})}
             
-            transcript_text = "未找到合适的字幕内容。"
+            # 筛选出所有中文相关的 Key (如 zh-Hans, zh-Hant, zh-TW, zh 等)
+            zh_keys = [k for k in all_subs.keys() if k.startswith('zh')]
             
-            if subtitles:
-                # 优先寻找中文，其次英文
-                target_lang = None
-                for lang in ['zh-Hans', 'zh-CN', 'en']:
-                    if lang in subtitles:
-                        target_lang = lang
-                        break
-                
-                if target_lang:
-                    # 获取字幕文件的 JSON 格式 URL (json3 格式最容易解析)
-                    sub_info = subtitles[target_lang]
-                    json_url = next((s['url'] for s in sub_info if s.get('ext') == 'json3'), None)
-                    
-                    if not json_url:
-                        # 如果没有 json3，取第一个可用的格式
-                        json_url = sub_info[0]['url']
+            target_key = None
+            if zh_keys:
+                target_key = zh_keys[0] # 取找到的第一个中文版本
+                print(f"找到中文标签: {target_key}")
+            elif 'en' in all_subs:
+                target_key = 'en'
+                print("未找到中文，回退至英文。")
 
-                    print(f"正在抓取 {target_lang} 字幕内容...")
+            transcript_text = "未找到任何字幕轨道。请检查视频是否开启了 CC 字幕。"
+
+            if target_key:
+                sub_info = all_subs[target_key]
+                # 尝试多种格式：json3 > vtt > srt
+                json_url = next((s['url'] for s in sub_info if 'json3' in s.get('ext', '')), None)
+                
+                if json_url:
                     resp = requests.get(json_url)
                     if resp.status_code == 200:
-                        # 简单清理一下 JSON 里的文字
                         data = resp.json()
                         lines = []
                         for event in data.get('events', []):
                             if 'segs' in event:
                                 text = "".join([s['utf8'] for s in event['segs'] if 'utf8' in s]).strip()
-                                if text:
-                                    lines.append(text)
+                                if text: lines.append(text)
                         transcript_text = "\n".join(lines)
+                else:
+                    transcript_text = f"找到字幕轨道但无法解析格式。下载链接: {sub_info[0]['url']}"
             
-            # 2. 保存到结果文件
             with open('result.txt', 'w', encoding='utf-8') as f:
-                f.write(f"标题: {title}\n")
-                f.write(f"链接: {video_url}\n")
+                f.write(f"标题: {info.get('title')}\n")
                 f.write("-" * 30 + "\n")
                 f.write(transcript_text)
                 
-            print("处理成功！内容已写入 result.txt")
+            print("处理完毕。")
             
     except Exception as e:
-        print(f"出错: {e}")
+        print(f"错误细节: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("错误: 请提供视频 URL")
-        sys.exit(1)
     run(sys.argv[1])
