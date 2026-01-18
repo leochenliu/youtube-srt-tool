@@ -1,34 +1,56 @@
 name: YouTube Fetcher
 
+# 允许手动触发
 on:
   workflow_dispatch:
     inputs:
       video_url:
         description: '粘贴 YouTube 视频链接'
         required: true
+        default: 'https://www.youtube.com/watch?v=vBu6zJAWcGs'
 
 jobs:
   run-task:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v4
+      # 1. 检出仓库代码
+      - name: Checkout Code
+        uses: actions/checkout@v4
       
+      # 2. 安装 Python 环境
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           
-      - name: Install Tools
-        run: pip install yt-dlp requests
+      # 3. 安装必备工具
+      # yt-dlp: 核心下载工具
+      # ffmpeg: 必备！用于将您遇到的 m3u8 字幕流转换为文本格式
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yt-dlp
+          sudo apt-get update && sudo apt-get install -y ffmpeg
         
+      # 4. 从 GitHub Secrets 注入 Cookie
+      # 这样可以绕过 YouTube 对数据中心 IP 的机器人检测
       - name: Prepare Cookies
-        run: echo "${{ secrets.YT_COOKIES }}" > cookies_temp.txt
+        run: |
+          echo "${{ secrets.YT_COOKIES }}" > cookies_temp.txt
         
+      # 5. 执行 Python 脚本
+      # 传入我们在页面输入的 URL
       - name: Run Script
         run: python fetch_transcript.py "${{ github.event.inputs.video_url }}"
         
+      # 6. 上传结果文件
+      # 运行结束后，您可以在 Actions 页面下方的 Artifacts 下载 result.txt
       - name: Upload Result
+        if: always() # 即使脚本报错也尝试上传日志
         uses: actions/upload-artifact@v4
         with:
           name: my-transcript
-          path: result.txt
+          path: |
+            result.txt
+            *.srt
