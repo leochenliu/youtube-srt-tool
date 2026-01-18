@@ -19,7 +19,7 @@ jobs:
           python-version: '3.10'
           
       - name: Install Tools
-        run: pip install yt-dlp
+        run: pip install yt-dlp requests
         
       - name: Prepare Cookies
         run: echo "${{ secrets.YT_COOKIES }}" > cookies_temp.txt
